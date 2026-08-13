@@ -1,0 +1,50 @@
+{
+  "name": "pi-tuicr",
+  "version": "0.1.0",
+  "description": "Review the changes pi made in tuicr, then send the review comments back to pi",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "extension",
+    "tuicr",
+    "code-review",
+    "git"
+  ],
+  "author": "Jozsef Gabor Lazar <me@joelazar.dev>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/joelazar/pi-tuicr.git"
+  },
+  "bugs": {
+    "url": "https://github.com/joelazar/pi-tuicr/issues"
+  },
+  "homepage": "https://github.com/joelazar/pi-tuicr#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "files": [
+    "index.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "check": "npm run typecheck && npm pack --dry-run"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "typescript": "^5.9.2"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  }
+}

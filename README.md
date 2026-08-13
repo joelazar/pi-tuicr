@@ -1,6 +1,6 @@
 # pi-tuicr
 
-Review the diff pi just produced in [tuicr](https://github.com/tuicr/tuicr), then hand your comments straight back to pi.
+Review the diff pi just produced in [tuicr](https://github.com/agavra/tuicr), then hand your comments straight back to pi.
 
 The usual loop is annoying: pi writes code, you read the diff somewhere else, then you retype your objections into the chat. This extension closes that loop. `/tuicr` suspends pi's TUI and opens tuicr on the working tree. Every comment you leave during that session gets collected, numbered, and prefilled into pi's editor when tuicr exits. You read it over, and press enter when you're happy.
 

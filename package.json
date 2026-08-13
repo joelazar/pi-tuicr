@@ -1,5 +1,5 @@
 {
-  "name": "pi-tuicr",
+  "name": "@joelazar/pi-tuicr",
   "version": "0.1.0",
   "description": "Review the changes pi made in tuicr, then send the review comments back to pi",
   "type": "module",
@@ -28,7 +28,8 @@
   "pi": {
     "extensions": [
       "./index.ts"
-    ]
+    ],
+    "image": "https://raw.githubusercontent.com/joelazar/pi-tuicr/main/assets/demo.gif"
   },
   "files": [
     "index.ts",

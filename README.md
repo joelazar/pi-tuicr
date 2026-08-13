@@ -11,7 +11,7 @@ Comments that were already in tuicr before you opened it are ignored, so an old 
 ## Install
 
 ```bash
-pi install npm:pi-tuicr
+pi install npm:@joelazar/pi-tuicr
 ```
 
 tuicr has to be on your `PATH`. The extension shells out to `tuicr -w` for the review UI and to `tuicr review list` / `tuicr review comments` for the JSON.

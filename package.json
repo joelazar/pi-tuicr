@@ -1,6 +1,6 @@
 {
   "name": "@joelazar/pi-tuicr",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Review the changes pi made in tuicr, then send the review comments back to pi",
   "type": "module",
   "keywords": [

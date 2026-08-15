@@ -77,7 +77,7 @@ function format(comments: Comment[]): string {
   });
 
   return [
-    "I reviewed your changes in tuicr. Please address these comments:",
+    "I reviewed your changes. Please address these comments:",
     "",
     ...lines,
   ].join("\n");

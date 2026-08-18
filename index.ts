@@ -1,10 +1,10 @@
 /**
  * pi-tuicr - review pi's changes in tuicr, then feed the comments back.
  *
- * `/tuicr` (or ctrl+shift+r) suspends pi's TUI and opens tuicr on the working
- * tree. When tuicr exits, any comments written during that session are
- * formatted and prefilled into the editor, so you can read them over and press
- * enter when you want pi to act on them.
+ * `/tuicr` (or ctrl+shift+r) asks what to review, suspends pi's TUI and opens
+ * tuicr on that diff. When tuicr exits, any comments written during that
+ * session are formatted and prefilled into the editor, so you can read them
+ * over and press enter when you want pi to act on them.
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
@@ -17,10 +17,8 @@ const COMMAND = "tuicr";
 const SHORTCUT = "ctrl+shift+r";
 
 interface Session {
-  slug: string;
-  kind: string;
-  updated_at: string;
-  active: boolean;
+  path: string;
+  comment_count: number;
 }
 
 interface Comment {
@@ -31,36 +29,117 @@ interface Comment {
   content: string;
 }
 
-/** Run a tuicr subcommand that prints JSON. Returns [] on any failure. */
-function tuicrJson<T>(args: string[], cwd: string): T[] {
+/**
+ * Run a command and capture its stdout. Returns null when the command cannot
+ * run or exits non-zero - the probe semantics both callers want (a missing
+ * tuicr, a ref that does not exist). Output that does run is trusted.
+ */
+function capture(cmd: string, args: string[], cwd: string): string | null {
   try {
-    const out = execFileSync(COMMAND, args, {
+    return execFileSync(cmd, args, {
       cwd,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-    });
-    const parsed: unknown = JSON.parse(out);
-    return Array.isArray(parsed) ? (parsed as T[]) : [];
+    }).trim();
   } catch {
-    return [];
+    return null;
   }
 }
 
-function localSessions(cwd: string): Session[] {
-  return tuicrJson<Session>(["review", "list", "--repo", cwd], cwd)
-    .filter((s) => s.kind === "local")
-    .sort((a, b) => (a.updated_at < b.updated_at ? 1 : -1));
+function git(args: string[], cwd: string): string | null {
+  return capture("git", args, cwd);
 }
 
-function commentsFor(slug: string, cwd: string): Comment[] {
-  return tuicrJson<Comment>(
-    ["review", "comments", "--repo", cwd, "--session", slug],
-    cwd,
-  );
+/** Run a tuicr subcommand that prints a JSON array. */
+function tuicrJson<T>(args: string[], cwd: string): T[] {
+  const out = capture(COMMAND, args, cwd);
+  if (out === null) return [];
+  const parsed: unknown = JSON.parse(out);
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${COMMAND} ${args.join(" ")} did not print a JSON array`);
+  }
+  return parsed as T[];
 }
 
 function allComments(cwd: string): Comment[] {
-  return localSessions(cwd).flatMap((s) => commentsFor(s.slug, cwd));
+  return tuicrJson<Session>(["review", "list", "--all"], cwd)
+    .filter((s) => s.comment_count > 0)
+    .flatMap((s) =>
+      tuicrJson<Comment>(["review", "comments", "--session", s.path], cwd),
+    );
+}
+
+/** Best guess at the branch this work forked from. */
+function baseBranch(cwd: string): string | null {
+  const head = git(
+    ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"],
+    cwd,
+  );
+  const candidates = [
+    ...(head ? [head] : []),
+    "origin/main",
+    "origin/master",
+    "main",
+    "master",
+  ];
+  const current = git(["rev-parse", "--abbrev-ref", "HEAD"], cwd);
+  for (const ref of candidates) {
+    if (ref === current) continue;
+    if (git(["rev-parse", "--verify", "--quiet", ref], cwd)) return ref;
+  }
+  return null;
+}
+
+/** Ask what to review; returns tuicr args, or null if the user backed out. */
+async function pickTarget(ctx: ExtensionContext): Promise<string[] | null> {
+  const base = baseBranch(ctx.cwd);
+  const ask = async (
+    c: ExtensionContext,
+    prompt: string,
+    hint: string,
+    build: (answer: string) => string[],
+  ): Promise<string[] | null> => {
+    const answer = (await c.ui.input(prompt, hint))?.trim();
+    return answer ? build(answer) : null;
+  };
+
+  const choices: Array<{
+    label: string;
+    resolve: (c: ExtensionContext) => Promise<string[] | null>;
+  }> = [
+    { label: "Uncommitted changes", resolve: async () => ["-w"] },
+    ...(base
+      ? [
+          {
+            label: `Branch vs ${base} (+ uncommitted)`,
+            resolve: async () => ["-r", `${base}..HEAD`, "-w"],
+          },
+          {
+            label: `Branch vs ${base}`,
+            resolve: async () => ["-r", `${base}..HEAD`],
+          },
+        ]
+      : []),
+    { label: "Last commit", resolve: async () => ["-r", "HEAD~1..HEAD"] },
+    { label: "Pick commits", resolve: async () => [] },
+    { label: "Every tracked file", resolve: async () => ["-A"] },
+    {
+      label: "Custom revset...",
+      resolve: (c) => ask(c, "Revset:", "e.g. HEAD~3..HEAD", (r) => ["-r", r]),
+    },
+    {
+      label: "Pull request...",
+      resolve: (c) =>
+        ask(c, "PR:", "number, owner/repo#N, or URL", (t) => ["pr", t]),
+    },
+  ];
+
+  const label = await ctx.ui.select(
+    "What should I open in tuicr?",
+    choices.map((c) => c.label),
+  );
+  const choice = choices.find((c) => c.label === label);
+  return choice ? await choice.resolve(ctx) : null;
 }
 
 function format(comments: Comment[]): string {
@@ -83,13 +162,16 @@ function format(comments: Comment[]): string {
   ].join("\n");
 }
 
-/** Suspend the TUI, run `tuicr -w` inheriting stdio, then restore the TUI. */
-function runTuicr(ctx: ExtensionContext): Promise<number | null> {
+/** Suspend the TUI, run tuicr inheriting stdio, then restore the TUI. */
+function runTuicr(
+  ctx: ExtensionContext,
+  args: string[],
+): Promise<number | null> {
   return ctx.ui.custom<number | null>((tui, _theme, _keybindings, done) => {
     tui.stop();
     process.stdout.write("\x1b[2J\x1b[H");
 
-    const result = spawnSync(COMMAND, ["-w"], {
+    const result = spawnSync(COMMAND, args, {
       stdio: "inherit",
       env: process.env,
       cwd: ctx.cwd,
@@ -108,10 +190,13 @@ async function review(ctx: ExtensionContext): Promise<void> {
     return;
   }
 
+  const args = await pickTarget(ctx);
+  if (!args) return;
+
   // Snapshot existing comment ids, so only this session's feedback comes back.
   const seen = new Set(allComments(ctx.cwd).map((c) => c.id));
 
-  const status = await runTuicr(ctx);
+  const status = await runTuicr(ctx, args);
   if (status === null) {
     ctx.ui.notify("Could not start tuicr - is it on your PATH?", "error");
     return;
@@ -136,14 +221,14 @@ async function review(ctx: ExtensionContext): Promise<void> {
 
 export default function (pi: ExtensionAPI) {
   pi.registerCommand(COMMAND, {
-    description: "Review working tree in tuicr, then load comments",
+    description: "Review a diff in tuicr, then load comments",
     handler: async (_args, ctx) => {
       await review(ctx);
     },
   });
 
   pi.registerShortcut(SHORTCUT, {
-    description: "Review working tree in tuicr",
+    description: "Review a diff in tuicr",
     handler: async (ctx) => {
       await review(ctx);
     },
